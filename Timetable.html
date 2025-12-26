@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Advanced Heatmap Study Tracker</title>
+<style>
+body { font-family: Arial, sans-serif; background: #f7f7f7; padding: 20px; }
+h2 { text-align: center; }
+#setup { margin-bottom: 20px; }
+input, button { padding: 8px; margin: 5px; border-radius: 5px; }
+table { border-collapse: collapse; width: 100%; max-width: 100%; overflow-x: auto; }
+th, td { border: 1px solid #ddd; padding: 8px; text-align: center; min-width: 80px; transition: background-color 0.3s; }
+th { background: #eee; }
+td { cursor: pointer; color: white; font-weight: bold; }
+.pending { background-color: #f0f0f0; color: black; } /* blank/default */
+.done { color:white; }
+@media(max-width:800px){
+    th, td { padding:6px; min-width:60px; }
+}
+#progressSummary { margin-bottom: 15px; font-weight:bold; }
+</style>
+</head>
+<body>
+
+<h2>📚 Advanced Heatmap Study Tracker</h2>
+
+<div id="setup">
+    <label>Enter Subjects (comma-separated):</label><br>
+    <input type="text" id="subjectInput" placeholder="Python, DSA, Java"><br>
+    <label>Start Date:</label>
+    <input type="date" id="startDate"><br>
+    <label>End Date:</label>
+    <input type="date" id="endDate"><br>
+    <button onclick="initTracker()">Create Tracker</button>
+    <button onclick="clearAll()">Clear All Data</button>
+    <button onclick="exportData()">Export JSON</button>
+    <input type="file" id="importFile" style="display:none;" onchange="importData(event)">
+    <button onclick="document.getElementById('importFile').click()">Import JSON</button>
+</div>
+
+<div id="progressSummary"></div>
+<table id="trackerTable"></table>
+
+<script>
+let subjects = [];
+let dates = [];
+let data = JSON.parse(localStorage.getItem("studyData")) || {};
+
+// Generate all dates between start and end
+function generateDates(start, end){
+    let arr = [];
+    let s = new Date(start);
+    let e = new Date(end);
+    while(s <= e){
+        arr.push(new Date(s));
+        s.setDate(s.getDate()+1);
+    }
+    return arr;
+}
+
+// Format date DD-MM-YYYY
+function formatDate(d){
+    const dd = String(d.getDate()).padStart(2,'0');
+    const mm = String(d.getMonth()+1).padStart(2,'0');
+    const yyyy = d.getFullYear();
+    return `${dd}-${mm}-${yyyy}`;
+}
+
+// Initialize tracker
+function initTracker(){
+    const subInput = document.getElementById("subjectInput").value.trim();
+    const start = document.getElementById("startDate").value;
+    const end = document.getElementById("endDate").value;
+    if(!subInput || !start || !end){ alert("Enter subjects and both dates"); return; }
+    subjects = subInput.split(",").map(s=>s.trim());
+    dates = generateDates(start,end);
+    saveData();
+    renderTable();
+}
+
+// Save to localStorage
+function saveData(){ 
+    localStorage.setItem("studyData", JSON.stringify(data));
+    localStorage.setItem("subjects", JSON.stringify(subjects));
+    localStorage.setItem("dates", JSON.stringify(dates.map(d=>formatDate(d))));
+}
+
+// Toggle cell (blank → green → red → blank)
+function toggleCell(dateStr, subject){
+    if(!data[dateStr]) data[dateStr]={};
+    const val = data[dateStr][subject] || 0;
+    data[dateStr][subject] = (val+1)%3; // 0→1→2→0
+    saveData();
+    renderTable();
+}
+
+// Get streak for heatmap intensity
+function getStreak(subject, dateIndex, colorType){
+    let streak = 0;
+    for(let i=dateIndex; i>=0; i--){
+        const key = formatDate(dates[i]);
+        if(data[key]?.[subject] === colorType) streak++;
+        else break;
+    }
+    return streak;
+}
+
+// Calculate and display weekly/overall progress
+function calculateProgress(){
+    if(subjects.length===0 || dates.length===0) return;
+    let summaryDiv = document.getElementById("progressSummary");
+    summaryDiv.innerHTML=""; 
+    let totalDone=0, totalScheduled=0;
+    
+    subjects.forEach(subject=>{
+        let done=0, scheduled=0;
+        dates.forEach(d=>{
+            const key=formatDate(d);
+            const val = data[key]?.[subject];
+            if(val===1) { done++; scheduled++; }
+            else if(val===2) { scheduled++; }
+        });
+        let perc = scheduled===0?0:Math.round((done/scheduled)*100);
+        summaryDiv.innerHTML+=`<div>${subject}: ${perc}% completed</div>`;
+        totalDone+=done; totalScheduled+=scheduled;
+    });
+    
+    let overall = totalScheduled===0?0:Math.round((totalDone/totalScheduled)*100);
+    summaryDiv.innerHTML+=`<div style="margin-top:5px;font-weight:bold">Overall Progress: ${overall}%</div>`;
+}
+
+// Render table
+function renderTable(){
+    if(subjects.length===0 || dates.length===0) return;
+    const table = document.getElementById("trackerTable");
+    table.innerHTML="";
+
+    // Header
+    let header="<tr><th>Subject \\ Date</th>";
+    dates.forEach(d=>header+=`<th>${formatDate(d)}</th>`);
+    header+="</tr>";
+    table.innerHTML+=header;
+
+    // Rows
+    subjects.forEach(subject=>{
+        let row=`<tr><th>${subject}</th>`;
+        dates.forEach((d,i)=>{
+            const key = formatDate(d);
+            const val = data[key]?.[subject] || 0;
+            let symbol="", bgColor="#f0f0f0"; 
+            if(val===1){ 
+                symbol="✔️";
+                const streak = getStreak(subject,i,1);
+                const intensity = Math.min(255, 180 + streak*5); 
+                bgColor = `rgb(33,${intensity},90)`; 
+            } else if(val===2){ 
+                symbol="❌";
+                const streak = getStreak(subject,i,2);
+                const intensity = Math.min(255, 180 + streak*5);
+                bgColor = `rgb(${intensity},33,33)`; 
+            }
+            row+=`<td style="background-color:${bgColor}" class="${val===0?'pending':'done'}" onclick="toggleCell('${key}','${subject}')">${symbol}</td>`;
+        });
+        row+="</tr>";
+        table.innerHTML+=row;
+    });
+    calculateProgress();
+}
+
+// Clear all
+function clearAll(){
+    if(confirm("Clear all saved data?")){ 
+        localStorage.removeItem("studyData"); 
+        localStorage.removeItem("subjects"); 
+        localStorage.removeItem("dates");
+        data={}; subjects=[]; dates=[];
+        renderTable(); 
+    }
+}
+
+// Export JSON
+function exportData(){
+    const exportObj = {subjects, dates:dates.map(d=>formatDate(d)), data};
+    const blob = new Blob([JSON.stringify(exportObj)], {type:"application/json"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href=url; a.download="studyTracker.json"; a.click();
+    URL.revokeObjectURL(url);
+}
+
+// Import JSON
+function importData(event){
+    const file = event.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = e=>{
+        try{
+            const imported = JSON.parse(e.target.result);
+            subjects = imported.subjects||[];
+            dates = (imported.dates||[]).map(d=>{
+                const parts=d.split("-");
+                return new Date(parts[2], parts[1]-1, parts[0]);
+            });
+            data = imported.data||{};
+            saveData();
+            renderTable();
+        }catch(err){ alert("Invalid JSON"); }
+    };
+    reader.readAsText(file);
+}
+
+// Restore data on page load
+window.onload = function(){
+    const savedData = JSON.parse(localStorage.getItem("studyData"));
+    const savedSubjects = JSON.parse(localStorage.getItem("subjects")||"[]");
+    const savedDates = JSON.parse(localStorage.getItem("dates")||"[]");
+
+    if(savedData && savedSubjects.length && savedDates.length){
+        data = savedData;
+        subjects = savedSubjects;
+        dates = savedDates.map(d=>{
+            const parts=d.split("-");
+            return new Date(parts[2], parts[1]-1, parts[0]);
+        });
+        renderTable();
+    }
+};
+</script>
+
+</body>
+</html>
